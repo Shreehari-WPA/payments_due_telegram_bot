@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.database import init_db
 from app.services import (
     VALID_CATEGORIES,
+    add_manager,
     consume_confirmation,
     create_pending_confirmation,
     get_active_template,
@@ -18,7 +19,9 @@ from app.services import (
     get_groups,
     infer_category_from_group_code,
     is_authorized_manager,
+    list_managers,
     normalize_category,
+    remove_manager,
     send_broadcast,
     set_group_active,
     today_status,
@@ -80,6 +83,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/set_template <message>\n\n'
         'Group setup command:\n'
         '/register <group_code> <category>\n\n'
+        'Manager setup commands:\n'
+        '/add_manager <telegram_user_id> [name]\n'
+        '/remove_manager <telegram_user_id>\n'
+        '/managers\n\n'
         'Categories: B2B, B2C, Powerplay, Viking'
     )
 
@@ -384,6 +391,68 @@ async def resume_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(f'{code} resumed.' if ok else f'Group not found: {code}')
 
 
+async def add_manager_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await ensure_manager(update):
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            'Use:\n/add_manager <telegram_user_id> [name]\n\n'
+            'Ask the person to send /my_id to this bot to get their ID.'
+        )
+        return
+
+    try:
+        new_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text('Telegram user ID must be numeric. Ask them to run /my_id.')
+        return
+
+    name = ' '.join(context.args[1:]).strip() or None
+    admin = add_manager(new_id, name)
+    await update.message.reply_text(
+        f'Added manager: {admin.telegram_user_id}' + (f' ({admin.name})' if admin.name else '')
+    )
+
+
+async def remove_manager_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await ensure_manager(update):
+        return
+
+    if not context.args:
+        await update.message.reply_text('Use: /remove_manager <telegram_user_id>')
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text('Telegram user ID must be numeric.')
+        return
+
+    try:
+        removed = remove_manager(target_id)
+    except ValueError as exc:
+        await update.message.reply_text(str(exc))
+        return
+
+    await update.message.reply_text(
+        f'Removed manager: {target_id}' if removed else 'That user is not currently an active manager.'
+    )
+
+
+async def list_managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await ensure_manager(update):
+        return
+
+    managers = list_managers()
+    if not managers:
+        await update.message.reply_text('No active managers.')
+        return
+
+    lines = [f'{m.telegram_user_id}' + (f' - {m.name}' if m.name else '') for m in managers]
+    await update.message.reply_text('Active managers:\n' + '\n'.join(lines))
+
+
 async def set_template_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await ensure_manager(update):
         return
@@ -454,6 +523,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler('pause_group', pause_group))
     application.add_handler(CommandHandler('resume_group', resume_group))
     application.add_handler(CommandHandler('set_template', set_template_command))
+    application.add_handler(CommandHandler('add_manager', add_manager_command))
+    application.add_handler(CommandHandler('remove_manager', remove_manager_command))
+    application.add_handler(CommandHandler('managers', list_managers_command))
 
     scheduled_time = parse_daily_time(settings.daily_send_time)
     application.job_queue.run_daily(

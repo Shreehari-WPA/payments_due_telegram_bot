@@ -1,0 +1,14 @@
+services:
+  bot:
+    build: .
+    container_name: payments_due_telegram_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////app/data/reminder_bot.db
+    volumes:
+      - bot_data:/app/data
+
+volumes:
+  bot_data:

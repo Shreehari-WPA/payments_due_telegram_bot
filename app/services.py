@@ -19,6 +19,7 @@ VALID_CATEGORIES = {
     'b2c': 'B2C',
     'powerplay': 'Powerplay',
     'viking': 'Viking',
+    
 }
 
 
@@ -63,6 +64,52 @@ def is_authorized_manager(user_id: int | None) -> bool:
             )
         ).scalar_one_or_none()
         return admin is not None
+
+
+def add_manager(telegram_user_id: int, name: str | None = None) -> BotAdmin:
+    with db_session() as session:
+        admin = session.execute(
+            select(BotAdmin).where(BotAdmin.telegram_user_id == telegram_user_id)
+        ).scalar_one_or_none()
+        if admin is None:
+            admin = BotAdmin(telegram_user_id=telegram_user_id, name=name, role='manager', active=True)
+            session.add(admin)
+        else:
+            admin.active = True
+            if name:
+                admin.name = name
+        session.flush()
+        session.expunge(admin)
+        return admin
+
+
+def remove_manager(telegram_user_id: int) -> bool:
+    with db_session() as session:
+        active_count = session.execute(
+            select(func.count(BotAdmin.id)).where(BotAdmin.active.is_(True))
+        ).scalar_one()
+        admin = session.execute(
+            select(BotAdmin).where(
+                BotAdmin.telegram_user_id == telegram_user_id,
+                BotAdmin.active.is_(True),
+            )
+        ).scalar_one_or_none()
+        if admin is None:
+            return False
+        if active_count <= 1:
+            raise ValueError('Cannot remove the last active manager.')
+        admin.active = False
+        return True
+
+
+def list_managers() -> list[BotAdmin]:
+    with db_session() as session:
+        admins = list(session.execute(
+            select(BotAdmin).where(BotAdmin.active.is_(True)).order_by(BotAdmin.created_at)
+        ).scalars().all())
+        for admin in admins:
+            session.expunge(admin)
+        return admins
 
 
 def get_active_template() -> str:
