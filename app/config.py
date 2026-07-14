@@ -13,7 +13,7 @@ DEFAULT_TIMEZONE = 'Asia/Dubai'
 DEFAULT_DAILY_SEND_TIME = '10:00'
 DEFAULT_SEND_DELAY_SECONDS = '1.2'
 DEFAULT_REMINDER_MESSAGE = (
-    'Good morning,\n\nThis is a gentle reminder regarding the pending payment settlement.\n\n'
+    '{greeting},\n\nThis is a gentle reminder regarding the pending payment settlement.\n\n'
     'Kindly arrange the payment at your earliest convenience.\n\nThank you.'
 )
 

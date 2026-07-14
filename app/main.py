@@ -71,9 +71,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '/send_reminder_b2c\n'
         '/send_reminder_powerplay\n'
         '/send_reminder_viking\n'
-        '/send_custom <message>                      (all groups)\n'
-        '/send_custom <category> <message>   (one category)\n'
-        '/send_custom <group_code> <message>  (one group)\n'
+        '/send_custom <message>                        (all groups)\n'
+        '/send_custom <category> <message>             (one category)\n'
+        '/send_custom <group_code> <message>            (one group)\n'
+        '/send_custom <code1,code2,...> <message>  (specific groups)\n'
         '/confirm_send <code>\n'
         '/cancel_send <code>\n'
         '/status_today\n'
@@ -159,6 +160,15 @@ async def preview_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
 
+def format_target_label(category: str | None, group_code: str | None) -> str:
+    if group_code:
+        codes = [c for c in group_code.split(',') if c]
+        if len(codes) > 1:
+            return f'{len(codes)} groups: {", ".join(codes)}'
+        return f'Group {codes[0]}'
+    return category or 'ALL categories'
+
+
 async def ask_confirmation(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -172,7 +182,7 @@ async def ask_confirmation(
     user = update.effective_user
     message = message_text if message_text is not None else get_active_template()
     code, target_count = create_pending_confirmation(user.id, category, message, group_code=group_code)
-    target_label = f'Group {group_code}' if group_code else (category or 'ALL categories')
+    target_label = format_target_label(category, group_code)
 
     if target_count == 0:
         await update.message.reply_text(f'No active groups found for target: {target_label}')
@@ -220,13 +230,15 @@ async def send_custom(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not remainder:
         await update.message.reply_text(
             'Use:\n'
-            '/send_custom <message>              (sends to ALL active groups)\n'
-            '/send_custom <category> <message>   (sends to one category)\n'
-            '/send_custom <group_code> <message>  (sends to one group)\n\n'
+            '/send_custom <message>                        (sends to ALL active groups)\n'
+            '/send_custom <category> <message>             (sends to one category)\n'
+            '/send_custom <group_code> <message>            (sends to one group)\n'
+            '/send_custom <code1,code2,...> <message>  (sends to specific groups)\n\n'
             'Examples:\n'
             '/send_custom Reminder: please clear your dues.\n'
             '/send_custom B2B Reminder for B2B groups only.\n'
-            '/send_custom B2B_001 Reminder for this group only.\n\n'
+            '/send_custom B2B_001 Reminder for this group only.\n'
+            '/send_custom B2B_001,B2C_002 Reminder for these two groups only.\n\n'
             'Categories: B2B, B2C, Powerplay, Viking'
         )
         return
@@ -240,6 +252,16 @@ async def send_custom(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         message_text = rest.strip()
     elif normalize_category(first_token) in VALID_CATEGORIES.values():
         category = normalize_category(first_token)
+        message_text = rest.strip()
+    elif ',' in first_token:
+        codes = list(dict.fromkeys(c.strip().upper() for c in first_token.split(',') if c.strip()))
+        invalid_codes = [c for c in codes if get_group_by_code(c) is None]
+        if invalid_codes:
+            await update.message.reply_text(
+                'Unknown group code(s): ' + ', '.join(invalid_codes) + '\n\nCheck /groups for valid codes.'
+            )
+            return
+        group_code = ','.join(codes)
         message_text = rest.strip()
     elif get_group_by_code(first_token) is not None:
         group_code = first_token.strip().upper()
@@ -306,10 +328,7 @@ async def confirm_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text('Invalid, expired, or already-used confirmation code.')
         return
 
-    target_label = (
-        f'group {pending.target_group_code}' if pending.target_group_code
-        else (pending.target_category or 'ALL categories')
-    )
+    target_label = format_target_label(pending.target_category, pending.target_group_code)
     await update.message.reply_text(f'Sending reminder to {target_label}. I will send you a summary after completion.')
 
     context.application.create_task(
@@ -461,7 +480,10 @@ async def set_template_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if not payload:
         await update.message.reply_text(
             'Use:\n/set_template <message>\n\n'
-            'Example:\n/set_template Good morning,\n\nThis is a gentle reminder regarding the pending payment settlement.\n\nThank you.'
+            'Example:\n/set_template {greeting}, This is a gentle reminder regarding the pending payment settlement. Thank you.\n\n'
+            'Tip: include {greeting} anywhere in the message and it will be replaced at send time — '
+            '"Good morning" for the scheduled daily send, or a time-of-day greeting '
+            '(Good morning/afternoon/evening) for anything you trigger manually.'
         )
         return
 

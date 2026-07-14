@@ -106,6 +106,7 @@ All manager commands are used in a **private chat** with the bot (not inside a g
 | `/send_custom <message>` | manager | One-off custom message to **all** active groups |
 | `/send_custom <category> <message>` | manager | One-off custom message to one **category** |
 | `/send_custom <group_code> <message>` | manager | One-off custom message to a single **group** |
+| `/send_custom <code1,code2,...> <message>` | manager | One-off custom message to a specific **list of groups** |
 | `/confirm_send <code>` | manager | Confirms and fires a pending broadcast |
 | `/cancel_send <code>` | manager | Cancels a pending broadcast |
 | `/status_today` | manager | Today's send counts by status + active group counts |
@@ -123,13 +124,16 @@ The first word after the command is checked in this order:
 
 1. `all` → every active group
 2. a known category (`B2B`, `B2C`, `Powerplay`, `Viking`) → that category only
-3. an existing group code → that single group only
-4. none of the above → the whole text is treated as the message, sent to **all** active groups
+3. contains a comma → treated as a list of group codes; if **any** code in the list doesn't
+   exist, the whole command is rejected and the bot tells you which code(s) are invalid
+4. an existing group code → that single group only
+5. none of the above → the whole text is treated as the message, sent to **all** active groups
 
 ```text
 /send_custom Reminder: please clear your dues.
 /send_custom B2B Reminder for B2B groups only.
 /send_custom B2B_001 Reminder for this group only.
+/send_custom B2B_001,B2C_002 Reminder for these two groups only.
 ```
 
 If your message must literally start with a word that happens to match a category name or a

@@ -3,6 +3,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, update
 from telegram import Bot
@@ -19,7 +20,6 @@ VALID_CATEGORIES = {
     'b2c': 'B2C',
     'powerplay': 'Powerplay',
     'viking': 'Viking',
-    
 }
 
 
@@ -38,6 +38,15 @@ def normalize_category(value: str | None) -> str | None:
         return None
     key = value.strip().lower()
     return VALID_CATEGORIES.get(key, value.strip())
+
+
+def get_time_based_greeting(tz_name: str) -> str:
+    hour = datetime.now(ZoneInfo(tz_name)).hour
+    if hour < 12:
+        return 'Good morning'
+    if hour < 17:
+        return 'Good afternoon'
+    return 'Good evening'
 
 
 def infer_category_from_group_code(group_code: str) -> str | None:
@@ -207,6 +216,7 @@ def get_group_counts() -> dict[str, int]:
 def get_groups(
     category: str | None = None,
     group_code: str | None = None,
+    group_codes: list[str] | None = None,
     active_only: bool = True,
 ) -> list[TelegramGroup]:
     category = normalize_category(category)
@@ -218,11 +228,20 @@ def get_groups(
             query = query.where(func.lower(TelegramGroup.category) == category.lower())
         if group_code:
             query = query.where(TelegramGroup.group_code == group_code.strip().upper())
+        if group_codes:
+            query = query.where(TelegramGroup.group_code.in_([c.strip().upper() for c in group_codes]))
         query = query.order_by(TelegramGroup.category, TelegramGroup.group_code)
         groups = list(session.execute(query).scalars().all())
         for group in groups:
             session.expunge(group)
         return groups
+
+
+def _split_group_codes(value: str | None) -> list[str] | None:
+    if not value:
+        return None
+    codes = [c.strip().upper() for c in value.split(',') if c.strip()]
+    return codes or None
 
 
 def get_group_by_code(group_code: str) -> TelegramGroup | None:
@@ -243,7 +262,8 @@ def create_pending_confirmation(
 ) -> tuple[str, int]:
     code = str(secrets.randbelow(9000) + 1000)
     expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10)
-    normalized_group_code = group_code.strip().upper() if group_code else None
+    group_codes = _split_group_codes(group_code)
+    normalized_group_code = ','.join(group_codes) if group_codes else None
     with db_session() as session:
         # Clear old unused confirmations for this user.
         session.execute(
@@ -261,7 +281,7 @@ def create_pending_confirmation(
             used=False,
         )
         session.add(pending)
-    count = len(get_groups(category=category, group_code=normalized_group_code, active_only=True))
+    count = len(get_groups(category=category, group_codes=group_codes, active_only=True))
     return code, count
 
 
@@ -321,7 +341,10 @@ async def send_broadcast(
     send_type: str,
     group_code: str | None = None,
 ) -> BroadcastResult:
-    groups = get_groups(category=category, group_code=group_code, active_only=True)
+    group_codes = _split_group_codes(group_code)
+    groups = get_groups(category=category, group_codes=group_codes, active_only=True)
+    greeting = 'Good morning' if send_type == 'scheduled' else get_time_based_greeting(settings.timezone)
+    message_text = message_text.replace('{greeting}', greeting)
     batch_id = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
     sent = 0
     failed = 0

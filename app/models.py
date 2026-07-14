@@ -68,7 +68,7 @@ class PendingConfirmation(Base):
     telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     confirmation_code: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     target_category: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    target_group_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    target_group_code: Mapped[str | None] = mapped_column(String(500), nullable=True)
     message_text: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
