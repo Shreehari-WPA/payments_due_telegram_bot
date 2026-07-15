@@ -12,7 +12,10 @@ templated or custom text reminders to Telegram groups.
 - Daily automatic reminder to all active groups at a fixed time
 - Manual broadcast trigger from a manager's phone, gated by a confirmation step
 - Category-wise sending: B2B, B2C, Powerplay, Viking
-- One-off **custom** messages targeted at all groups, one category, or a single group
+- One-off **custom** messages targeted at all groups, one category, one group, or a specific list
+  of groups
+- Time-sensitive greeting (`{greeting}`) — resolves to "Good morning"/"Good afternoon"/"Good
+  evening" for manager-initiated sends, always "Good morning" for the automatic daily send
 - Pause/resume individual groups
 - Managers can be added/removed live, at runtime, by any existing manager (no redeploy needed)
 - Full send log / audit trail (`/status_today`)
@@ -53,7 +56,7 @@ environment variables. Environment variables always win over the hardcoded defau
 | `TIMEZONE` | No | `Asia/Dubai` | IANA timezone used for the daily send time |
 | `DAILY_SEND_TIME` | No | `10:00` | `HH:MM` local time the automatic daily reminder fires |
 | `SEND_DELAY_SECONDS` | No | `1.2` | Delay between individual group sends (rate-limit safety) |
-| `DEFAULT_REMINDER_MESSAGE` | No | see `.env.example` | Seeded as the active template on first run only |
+| `DEFAULT_REMINDER_MESSAGE` | No | see `.env.example` | Seeded as the active template on first run only. Include `{greeting}` to get the time-sensitive greeting (see below) |
 
 `MANAGER_TELEGRAM_IDS` only seeds managers on the **first** run (when the `bot_admins` table is
 empty for that user). After that, manage who has access with `/add_manager` / `/remove_manager`
@@ -113,7 +116,7 @@ All manager commands are used in a **private chat** with the bot (not inside a g
 | `/groups [category]` | manager | Lists registered groups (up to 80) |
 | `/pause_group <group_code>` | manager | Deactivates a group (stops receiving broadcasts) |
 | `/resume_group <group_code>` | manager | Reactivates a paused group |
-| `/set_template <message>` | manager | Updates the saved daily reminder template |
+| `/set_template <message>` | manager | Updates the saved daily reminder template (supports `{greeting}`) |
 | `/add_manager <telegram_user_id> [name]` | manager | Grants another user manager access |
 | `/remove_manager <telegram_user_id>` | manager | Revokes manager access (refuses to remove the last manager) |
 | `/managers` | manager | Lists currently active managers |
@@ -142,7 +145,7 @@ registered group code, prefix it with `all` to avoid ambiguity.
 ### Edit the daily reminder template
 
 ```text
-/set_template Good morning,
+/set_template {greeting},
 
 This is a gentle reminder regarding the pending payment settlement.
 
@@ -150,6 +153,28 @@ Kindly arrange the payment at your earliest convenience.
 
 Thank you.
 ```
+
+`{greeting}` is optional — plain text without it works fine too, it just won't have a
+time-sensitive opener. See [Time-sensitive greeting](#time-sensitive-greeting) below.
+
+### Time-sensitive greeting
+
+Any message text — the saved template, or a one-off `/send_custom` message — can include the
+literal placeholder `{greeting}`. It's resolved right before sending, not when you preview or
+save it:
+
+| Send type | Resolved greeting |
+|---|---|
+| Automatic daily send (the scheduled job) | Always `Good morning`, regardless of clock time |
+| Anything manager-initiated (`/send_reminder_*`, `/send_custom`, `/confirm_send`) | Based on the current time in `TIMEZONE`: before 12:00 → `Good morning`, 12:00–16:59 → `Good afternoon`, 17:00 onward → `Good evening` |
+
+Notes:
+- `/preview_reminder` intentionally shows the **raw, unresolved** `{greeting}` text — only an
+  actual send resolves it. This is expected, not a bug.
+- If a message doesn't contain `{greeting}` at all, nothing happens — it's a plain substitution,
+  not a forced prefix.
+- The greeting depends on the server's system clock being correct (it's read via `datetime.now()`
+  and converted through `TIMEZONE`, not fetched from an external time source).
 
 ### Pause/resume a group
 
@@ -191,6 +216,17 @@ Run this after any change to the confirm/send pipeline:
 4. Run `/confirm_send <code>` from the reply.
 5. Confirm the test group actually receives the message.
 6. Run `/status_today` and confirm the send shows up as `sent`.
+
+### Testing the time-sensitive greeting
+
+1. Make sure the active template (or your test message) includes `{greeting}` — check with
+   `/preview_reminder`; it should show the raw, unresolved placeholder.
+2. Trigger a manual send (`/send_reminder_all`, `/send_custom`, etc.) and `/confirm_send` it. The
+   delivered message should open with whatever matches the current time in `TIMEZONE`: morning,
+   afternoon, or evening.
+3. To verify the scheduled path stays fixed at "Good morning" regardless of clock time, temporarily
+   set `DAILY_SEND_TIME` in `.env` to a couple of minutes from now, restart the bot, and let the
+   daily job fire. Then revert `DAILY_SEND_TIME` and restart again.
 
 ## Docker
 
